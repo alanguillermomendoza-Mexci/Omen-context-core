@@ -1,0 +1,326 @@
+-- ============================================================
+-- OMEN CONTEXT DATABASE
+-- Archivo: omen_context.db
+-- Versión: 1.0
+-- Entorno: SQLite puro, local, offline, soberano
+-- ============================================================
+
+PRAGMA foreign_keys = ON;
+
+BEGIN TRANSACTION;
+
+-- ============================================================
+-- TABLA: projects
+-- ============================================================
+CREATE TABLE IF NOT EXISTS projects (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    status_id   INTEGER,
+    notes       TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at  TEXT,
+    FOREIGN KEY (status_id) REFERENCES statuses(id)
+);
+
+-- ============================================================
+-- TABLA: entry_types
+-- ============================================================
+CREATE TABLE IF NOT EXISTS entry_types (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ============================================================
+-- TABLA: priorities
+-- ============================================================
+CREATE TABLE IF NOT EXISTS priorities (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ============================================================
+-- TABLA: statuses
+-- ============================================================
+CREATE TABLE IF NOT EXISTS statuses (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ============================================================
+-- TABLA: modules
+-- ============================================================
+CREATE TABLE IF NOT EXISTS modules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL,
+    name        TEXT    NOT NULL,
+    description TEXT,
+    status_id   INTEGER,
+    priority_id INTEGER,
+    notes       TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at  TEXT,
+    FOREIGN KEY (project_id)  REFERENCES projects(id),
+    FOREIGN KEY (status_id)   REFERENCES statuses(id),
+    FOREIGN KEY (priority_id) REFERENCES priorities(id),
+    UNIQUE (project_id, name)
+);
+
+-- ============================================================
+-- TABLA: context_entries
+-- ============================================================
+CREATE TABLE IF NOT EXISTS context_entries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      INTEGER NOT NULL,
+    module_id       INTEGER NOT NULL,
+    entry_type_id   INTEGER NOT NULL,
+    priority_id     INTEGER,
+    status_id       INTEGER,
+    title           TEXT    NOT NULL CHECK (trim(title) != ''),
+    summary         TEXT,
+    content         TEXT    NOT NULL CHECK (trim(content) != ''),
+    source          TEXT,
+    event_datetime  TEXT,
+    is_key_context  INTEGER NOT NULL DEFAULT 0 CHECK (is_key_context IN (0, 1)),
+    notes           TEXT,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at      TEXT,
+    FOREIGN KEY (project_id)    REFERENCES projects(id),
+    FOREIGN KEY (module_id)     REFERENCES modules(id),
+    FOREIGN KEY (entry_type_id) REFERENCES entry_types(id),
+    FOREIGN KEY (priority_id)   REFERENCES priorities(id),
+    FOREIGN KEY (status_id)     REFERENCES statuses(id)
+);
+
+-- ============================================================
+-- TABLA: tags
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tags (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ============================================================
+-- TABLA: entry_tags
+-- ============================================================
+CREATE TABLE IF NOT EXISTS entry_tags (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id   INTEGER NOT NULL,
+    tag_id     INTEGER NOT NULL,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (entry_id) REFERENCES context_entries(id),
+    FOREIGN KEY (tag_id)   REFERENCES tags(id),
+    UNIQUE (entry_id, tag_id)
+);
+
+-- ============================================================
+-- TABLA: entry_relations
+-- ============================================================
+CREATE TABLE IF NOT EXISTS entry_relations (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_entry_id  INTEGER NOT NULL,
+    target_entry_id  INTEGER NOT NULL,
+    relation_type    TEXT    NOT NULL,
+    description      TEXT,
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (source_entry_id) REFERENCES context_entries(id),
+    FOREIGN KEY (target_entry_id) REFERENCES context_entries(id),
+    CHECK (source_entry_id != target_entry_id)
+);
+
+-- ============================================================
+-- TABLA: activity_log
+-- ============================================================
+CREATE TABLE IF NOT EXISTS activity_log (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id         INTEGER,
+    module_id          INTEGER,
+    entry_id           INTEGER,
+    action_type        TEXT    NOT NULL,
+    action_description TEXT,
+    source             TEXT,
+    created_at         TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (project_id) REFERENCES projects(id),
+    FOREIGN KEY (module_id)  REFERENCES modules(id),
+    FOREIGN KEY (entry_id)   REFERENCES context_entries(id)
+);
+
+-- ============================================================
+-- ÍNDICES
+-- ============================================================
+
+-- context_entries
+CREATE INDEX IF NOT EXISTS idx_ce_project_id    ON context_entries(project_id);
+CREATE INDEX IF NOT EXISTS idx_ce_module_id     ON context_entries(module_id);
+CREATE INDEX IF NOT EXISTS idx_ce_entry_type_id ON context_entries(entry_type_id);
+CREATE INDEX IF NOT EXISTS idx_ce_priority_id   ON context_entries(priority_id);
+CREATE INDEX IF NOT EXISTS idx_ce_status_id     ON context_entries(status_id);
+CREATE INDEX IF NOT EXISTS idx_ce_created_at    ON context_entries(created_at);
+CREATE INDEX IF NOT EXISTS idx_ce_is_key        ON context_entries(is_key_context);
+
+-- modules
+CREATE INDEX IF NOT EXISTS idx_mod_project_id   ON modules(project_id);
+
+-- entry_tags
+CREATE INDEX IF NOT EXISTS idx_et_entry_id      ON entry_tags(entry_id);
+CREATE INDEX IF NOT EXISTS idx_et_tag_id        ON entry_tags(tag_id);
+
+-- entry_relations
+CREATE INDEX IF NOT EXISTS idx_er_source        ON entry_relations(source_entry_id);
+CREATE INDEX IF NOT EXISTS idx_er_target        ON entry_relations(target_entry_id);
+
+-- activity_log
+CREATE INDEX IF NOT EXISTS idx_al_project_id    ON activity_log(project_id);
+CREATE INDEX IF NOT EXISTS idx_al_module_id     ON activity_log(module_id);
+CREATE INDEX IF NOT EXISTS idx_al_entry_id      ON activity_log(entry_id);
+CREATE INDEX IF NOT EXISTS idx_al_created_at    ON activity_log(created_at);
+
+-- catálogos por name
+CREATE INDEX IF NOT EXISTS idx_tags_name        ON tags(name);
+CREATE INDEX IF NOT EXISTS idx_et_name          ON entry_types(name);
+CREATE INDEX IF NOT EXISTS idx_pri_name         ON priorities(name);
+CREATE INDEX IF NOT EXISTS idx_sta_name         ON statuses(name);
+
+-- ============================================================
+-- DATOS SEMILLA
+-- ============================================================
+
+-- statuses (se inserta primero porque projects lo referencia)
+INSERT OR IGNORE INTO statuses (name, description, sort_order, created_at) VALUES
+    ('activo',      'Elemento activo en uso',               1, datetime('now', 'localtime')),
+    ('pendiente',   'Pendiente de acción o revisión',       2, datetime('now', 'localtime')),
+    ('en revisión', 'Bajo revisión activa',                 3, datetime('now', 'localtime')),
+    ('cerrado',     'Finalizado y cerrado',                 4, datetime('now', 'localtime')),
+    ('descartado',  'Descartado, no aplicará',              5, datetime('now', 'localtime')),
+    ('crítico',     'Requiere atención inmediata',          6, datetime('now', 'localtime'));
+
+-- priorities
+INSERT OR IGNORE INTO priorities (name, description, sort_order, created_at) VALUES
+    ('baja',    'Prioridad baja, sin urgencia',             1, datetime('now', 'localtime')),
+    ('media',   'Prioridad media, atención normal',         2, datetime('now', 'localtime')),
+    ('alta',    'Prioridad alta, atención preferente',      3, datetime('now', 'localtime')),
+    ('urgente', 'Urgente, atención inmediata requerida',    4, datetime('now', 'localtime'));
+
+-- entry_types
+INSERT OR IGNORE INTO entry_types (name, description, created_at) VALUES
+    ('contexto',    'Información de contexto general del proyecto',     datetime('now', 'localtime')),
+    ('decisión',    'Decisión tomada dentro del proyecto',              datetime('now', 'localtime')),
+    ('idea',        'Idea o propuesta para evaluación futura',          datetime('now', 'localtime')),
+    ('cambio',      'Cambio aplicado en el sistema o flujo',            datetime('now', 'localtime')),
+    ('error',       'Error detectado o registrado',                     datetime('now', 'localtime')),
+    ('pendiente',   'Tarea o punto pendiente de resolución',            datetime('now', 'localtime')),
+    ('resumen',     'Resumen de sesión, etapa o bloque de trabajo',     datetime('now', 'localtime')),
+    ('instrucción', 'Instrucción operativa o protocolo interno',        datetime('now', 'localtime')),
+    ('referencia',  'Referencia técnica o documental',                  datetime('now', 'localtime')),
+    ('hallazgo',    'Descubrimiento relevante durante el desarrollo',   datetime('now', 'localtime')),
+    ('prueba',      'Resultado o registro de prueba realizada',         datetime('now', 'localtime'));
+
+-- projects
+INSERT OR IGNORE INTO projects (name, description, status_id, notes, created_at) VALUES
+    (
+        'OMEN',
+        'Sistema de contexto local, offline y soberano para preservar memoria operativa del proyecto.',
+        (SELECT id FROM statuses WHERE name = 'activo'),
+        'Proyecto raíz del sistema de contexto. Primera base de datos operativa.',
+        datetime('now', 'localtime')
+    );
+
+-- modules para OMEN
+INSERT OR IGNORE INTO modules (project_id, name, description, status_id, priority_id, created_at) VALUES
+    (
+        (SELECT id FROM projects WHERE name = 'OMEN'),
+        'base de datos',
+        'Diseño, esquema y gestión de la base de datos SQLite del sistema OMEN.',
+        (SELECT id FROM statuses   WHERE name = 'activo'),
+        (SELECT id FROM priorities WHERE name = 'alta'),
+        datetime('now', 'localtime')
+    ),
+    (
+        (SELECT id FROM projects WHERE name = 'OMEN'),
+        'arquitectura general',
+        'Estructura general del sistema, decisiones de diseño y componentes principales.',
+        (SELECT id FROM statuses   WHERE name = 'activo'),
+        (SELECT id FROM priorities WHERE name = 'alta'),
+        datetime('now', 'localtime')
+    ),
+    (
+        (SELECT id FROM projects WHERE name = 'OMEN'),
+        'protocolos',
+        'Protocolos operativos internos para el uso y mantenimiento del sistema.',
+        (SELECT id FROM statuses   WHERE name = 'activo'),
+        (SELECT id FROM priorities WHERE name = 'media'),
+        datetime('now', 'localtime')
+    ),
+    (
+        (SELECT id FROM projects WHERE name = 'OMEN'),
+        'automatización futura',
+        'Módulo reservado para futuras integraciones con scripts y automatización local.',
+        (SELECT id FROM statuses   WHERE name = 'pendiente'),
+        (SELECT id FROM priorities WHERE name = 'media'),
+        datetime('now', 'localtime')
+    ),
+    (
+        (SELECT id FROM projects WHERE name = 'OMEN'),
+        'seguridad y soberanía',
+        'Principios, reglas y controles para garantizar soberanía digital y operación offline.',
+        (SELECT id FROM statuses   WHERE name = 'activo'),
+        (SELECT id FROM priorities WHERE name = 'alta'),
+        datetime('now', 'localtime')
+    ),
+    (
+        (SELECT id FROM projects WHERE name = 'OMEN'),
+        'memoria contextual',
+        'Sistema central de registro y recuperación de contexto operativo del proyecto.',
+        (SELECT id FROM statuses   WHERE name = 'activo'),
+        (SELECT id FROM priorities WHERE name = 'urgente'),
+        datetime('now', 'localtime')
+    ),
+    (
+        (SELECT id FROM projects WHERE name = 'OMEN'),
+        'documentación',
+        'Documentación del sistema, guías y referencias internas.',
+        (SELECT id FROM statuses   WHERE name = 'activo'),
+        (SELECT id FROM priorities WHERE name = 'media'),
+        datetime('now', 'localtime')
+    ),
+    (
+        (SELECT id FROM projects WHERE name = 'OMEN'),
+        'errores y bloqueos',
+        'Registro de errores detectados, bloqueos operativos y sus resoluciones.',
+        (SELECT id FROM statuses   WHERE name = 'activo'),
+        (SELECT id FROM priorities WHERE name = 'alta'),
+        datetime('now', 'localtime')
+    ),
+    (
+        (SELECT id FROM projects WHERE name = 'OMEN'),
+        'ideas y expansión',
+        'Ideas, propuestas y posibles expansiones futuras del sistema.',
+        (SELECT id FROM statuses   WHERE name = 'pendiente'),
+        (SELECT id FROM priorities WHERE name = 'baja'),
+        datetime('now', 'localtime')
+    );
+
+-- tags
+INSERT OR IGNORE INTO tags (name, description, created_at) VALUES
+    ('contexto crítico',  'Información crítica para no perder contexto del proyecto',    datetime('now', 'localtime')),
+    ('estructura inicial','Elementos de la estructura base del sistema',                 datetime('now', 'localtime')),
+    ('offline',           'Relacionado con operación offline y sin red',                 datetime('now', 'localtime')),
+    ('soberanía',         'Principios de soberanía digital y control local',             datetime('now', 'localtime')),
+    ('v1',                'Pertenece a la versión 1 del sistema',                        datetime('now', 'localtime')),
+    ('expansión futura',  'Marcado para expansión en versiones futuras',                 datetime('now', 'localtime')),
+    ('flujo de trabajo',  'Relacionado con el flujo operativo del proyecto',             datetime('now', 'localtime')),
+    ('ia local',          'Relacionado con integración futura con IA local',             datetime('now', 'localtime')),
+    ('bloqueo',           'Punto de bloqueo registrado o resuelto',                      datetime('now', 'localtime')),
+    ('arquitectura base', 'Componente de la arquitectura base del sistema',              datetime('now', 'localtime'));
+
+COMMIT;

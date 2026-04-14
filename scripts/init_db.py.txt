@@ -1,0 +1,408 @@
+# ============================================================
+# OMEN Context Database — Script de inicialización
+# Archivo: setup_omen_db.py
+# Versión: 1.0
+# Requiere: Python 3.x estándar, sin dependencias externas
+# Uso: python setup_omen_db.py
+# ============================================================
+
+import sqlite3
+import os
+import sys
+from datetime import datetime
+
+# ============================================================
+# CONFIGURACIÓN
+# ============================================================
+
+DB_FILENAME = "omen_context.db"
+TIMESTAMP   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ============================================================
+# ESQUEMA SQL
+# ============================================================
+
+SCHEMA_SQL = """
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS projects (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    status_id   INTEGER,
+    notes       TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at  TEXT,
+    FOREIGN KEY (status_id) REFERENCES statuses(id)
+);
+
+CREATE TABLE IF NOT EXISTS entry_types (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS priorities (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS statuses (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS modules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL,
+    name        TEXT    NOT NULL,
+    description TEXT,
+    status_id   INTEGER,
+    priority_id INTEGER,
+    notes       TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at  TEXT,
+    FOREIGN KEY (project_id)  REFERENCES projects(id),
+    FOREIGN KEY (status_id)   REFERENCES statuses(id),
+    FOREIGN KEY (priority_id) REFERENCES priorities(id),
+    UNIQUE (project_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS context_entries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      INTEGER NOT NULL,
+    module_id       INTEGER NOT NULL,
+    entry_type_id   INTEGER NOT NULL,
+    priority_id     INTEGER,
+    status_id       INTEGER,
+    title           TEXT    NOT NULL CHECK (trim(title) != ''),
+    summary         TEXT,
+    content         TEXT    NOT NULL CHECK (trim(content) != ''),
+    source          TEXT,
+    event_datetime  TEXT,
+    is_key_context  INTEGER NOT NULL DEFAULT 0 CHECK (is_key_context IN (0, 1)),
+    notes           TEXT,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at      TEXT,
+    FOREIGN KEY (project_id)    REFERENCES projects(id),
+    FOREIGN KEY (module_id)     REFERENCES modules(id),
+    FOREIGN KEY (entry_type_id) REFERENCES entry_types(id),
+    FOREIGN KEY (priority_id)   REFERENCES priorities(id),
+    FOREIGN KEY (status_id)     REFERENCES statuses(id)
+);
+
+CREATE TABLE IF NOT EXISTS tags (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    description TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS entry_tags (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id   INTEGER NOT NULL,
+    tag_id     INTEGER NOT NULL,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (entry_id) REFERENCES context_entries(id),
+    FOREIGN KEY (tag_id)   REFERENCES tags(id),
+    UNIQUE (entry_id, tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS entry_relations (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_entry_id  INTEGER NOT NULL,
+    target_entry_id  INTEGER NOT NULL,
+    relation_type    TEXT    NOT NULL,
+    description      TEXT,
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (source_entry_id) REFERENCES context_entries(id),
+    FOREIGN KEY (target_entry_id) REFERENCES context_entries(id),
+    CHECK (source_entry_id != target_entry_id)
+);
+
+CREATE TABLE IF NOT EXISTS activity_log (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id         INTEGER,
+    module_id          INTEGER,
+    entry_id           INTEGER,
+    action_type        TEXT    NOT NULL,
+    action_description TEXT,
+    source             TEXT,
+    created_at         TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (project_id) REFERENCES projects(id),
+    FOREIGN KEY (module_id)  REFERENCES modules(id),
+    FOREIGN KEY (entry_id)   REFERENCES context_entries(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ce_project_id    ON context_entries(project_id);
+CREATE INDEX IF NOT EXISTS idx_ce_module_id     ON context_entries(module_id);
+CREATE INDEX IF NOT EXISTS idx_ce_entry_type_id ON context_entries(entry_type_id);
+CREATE INDEX IF NOT EXISTS idx_ce_priority_id   ON context_entries(priority_id);
+CREATE INDEX IF NOT EXISTS idx_ce_status_id     ON context_entries(status_id);
+CREATE INDEX IF NOT EXISTS idx_ce_created_at    ON context_entries(created_at);
+CREATE INDEX IF NOT EXISTS idx_ce_is_key        ON context_entries(is_key_context);
+CREATE INDEX IF NOT EXISTS idx_mod_project_id   ON modules(project_id);
+CREATE INDEX IF NOT EXISTS idx_et_entry_id      ON entry_tags(entry_id);
+CREATE INDEX IF NOT EXISTS idx_et_tag_id        ON entry_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_er_source        ON entry_relations(source_entry_id);
+CREATE INDEX IF NOT EXISTS idx_er_target        ON entry_relations(target_entry_id);
+CREATE INDEX IF NOT EXISTS idx_al_project_id    ON activity_log(project_id);
+CREATE INDEX IF NOT EXISTS idx_al_module_id     ON activity_log(module_id);
+CREATE INDEX IF NOT EXISTS idx_al_entry_id      ON activity_log(entry_id);
+CREATE INDEX IF NOT EXISTS idx_al_created_at    ON activity_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_tags_name        ON tags(name);
+CREATE INDEX IF NOT EXISTS idx_etype_name       ON entry_types(name);
+CREATE INDEX IF NOT EXISTS idx_pri_name         ON priorities(name);
+CREATE INDEX IF NOT EXISTS idx_sta_name         ON statuses(name);
+"""
+
+
+# ============================================================
+# DATOS SEMILLA
+# ============================================================
+
+def insertar_semilla(cursor, ts):
+    """Inserta todos los datos semilla iniciales."""
+
+    # --- statuses ---
+    statuses = [
+        ("activo",      "Elemento activo en uso",               1),
+        ("pendiente",   "Pendiente de acción o revisión",       2),
+        ("en revisión", "Bajo revisión activa",                 3),
+        ("cerrado",     "Finalizado y cerrado",                 4),
+        ("descartado",  "Descartado, no aplicará",              5),
+        ("crítico",     "Requiere atención inmediata",          6),
+    ]
+    cursor.executemany(
+        "INSERT OR IGNORE INTO statuses (name, description, sort_order, created_at) VALUES (?, ?, ?, ?)",
+        [(s[0], s[1], s[2], ts) for s in statuses]
+    )
+
+    # --- priorities ---
+    priorities = [
+        ("baja",    "Prioridad baja, sin urgencia",             1),
+        ("media",   "Prioridad media, atención normal",         2),
+        ("alta",    "Prioridad alta, atención preferente",      3),
+        ("urgente", "Urgente, atención inmediata requerida",    4),
+    ]
+    cursor.executemany(
+        "INSERT OR IGNORE INTO priorities (name, description, sort_order, created_at) VALUES (?, ?, ?, ?)",
+        [(p[0], p[1], p[2], ts) for p in priorities]
+    )
+
+    # --- entry_types ---
+    entry_types = [
+        ("contexto",    "Información de contexto general del proyecto"),
+        ("decisión",    "Decisión tomada dentro del proyecto"),
+        ("idea",        "Idea o propuesta para evaluación futura"),
+        ("cambio",      "Cambio aplicado en el sistema o flujo"),
+        ("error",       "Error detectado o registrado"),
+        ("pendiente",   "Tarea o punto pendiente de resolución"),
+        ("resumen",     "Resumen de sesión, etapa o bloque de trabajo"),
+        ("instrucción", "Instrucción operativa o protocolo interno"),
+        ("referencia",  "Referencia técnica o documental"),
+        ("hallazgo",    "Descubrimiento relevante durante el desarrollo"),
+        ("prueba",      "Resultado o registro de prueba realizada"),
+    ]
+    cursor.executemany(
+        "INSERT OR IGNORE INTO entry_types (name, description, created_at) VALUES (?, ?, ?)",
+        [(e[0], e[1], ts) for e in entry_types]
+    )
+
+    # --- project OMEN ---
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO projects (name, description, status_id, notes, created_at)
+        VALUES (
+            'OMEN',
+            'Sistema de contexto local, offline y soberano para preservar memoria operativa del proyecto.',
+            (SELECT id FROM statuses WHERE name = 'activo'),
+            'Proyecto raíz del sistema de contexto. Primera base de datos operativa.',
+            ?
+        )
+        """,
+        (ts,)
+    )
+
+    # --- modules para OMEN ---
+    modules = [
+        ("base de datos",
+         "Diseño, esquema y gestión de la base de datos SQLite del sistema OMEN.",
+         "activo",   "alta"),
+        ("arquitectura general",
+         "Estructura general del sistema, decisiones de diseño y componentes principales.",
+         "activo",   "alta"),
+        ("protocolos",
+         "Protocolos operativos internos para el uso y mantenimiento del sistema.",
+         "activo",   "media"),
+        ("automatización futura",
+         "Módulo reservado para futuras integraciones con scripts y automatización local.",
+         "pendiente","media"),
+        ("seguridad y soberanía",
+         "Principios, reglas y controles para garantizar soberanía digital y operación offline.",
+         "activo",   "alta"),
+        ("memoria contextual",
+         "Sistema central de registro y recuperación de contexto operativo del proyecto.",
+         "activo",   "urgente"),
+        ("documentación",
+         "Documentación del sistema, guías y referencias internas.",
+         "activo",   "media"),
+        ("errores y bloqueos",
+         "Registro de errores detectados, bloqueos operativos y sus resoluciones.",
+         "activo",   "alta"),
+        ("ideas y expansión",
+         "Ideas, propuestas y posibles expansiones futuras del sistema.",
+         "pendiente","baja"),
+    ]
+    for mod in modules:
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO modules
+                (project_id, name, description, status_id, priority_id, created_at)
+            VALUES (
+                (SELECT id FROM projects   WHERE name = 'OMEN'),
+                ?,
+                ?,
+                (SELECT id FROM statuses   WHERE name = ?),
+                (SELECT id FROM priorities WHERE name = ?),
+                ?
+            )
+            """,
+            (mod[0], mod[1], mod[2], mod[3], ts)
+        )
+
+    # --- tags ---
+    tags = [
+        ("contexto crítico",  "Información crítica para no perder contexto del proyecto"),
+        ("estructura inicial","Elementos de la estructura base del sistema"),
+        ("offline",           "Relacionado con operación offline y sin red"),
+        ("soberanía",         "Principios de soberanía digital y control local"),
+        ("v1",                "Pertenece a la versión 1 del sistema"),
+        ("expansión futura",  "Marcado para expansión en versiones futuras"),
+        ("flujo de trabajo",  "Relacionado con el flujo operativo del proyecto"),
+        ("ia local",          "Relacionado con integración futura con IA local"),
+        ("bloqueo",           "Punto de bloqueo registrado o resuelto"),
+        ("arquitectura base", "Componente de la arquitectura base del sistema"),
+    ]
+    cursor.executemany(
+        "INSERT OR IGNORE INTO tags (name, description, created_at) VALUES (?, ?, ?)",
+        [(t[0], t[1], ts) for t in tags]
+    )
+
+    print("  [OK] Datos semilla insertados.")
+
+
+# ============================================================
+# VERIFICACIÓN DE BASE EXISTENTE
+# ============================================================
+
+def verificar_base_existente(db_path):
+    """
+    Si la base de datos ya existe, pide confirmación antes de continuar.
+    No destruye la base; el esquema usa IF NOT EXISTS para ser seguro.
+    """
+    if os.path.exists(db_path):
+        print(f"\n[AVISO] El archivo '{db_path}' ya existe.")
+        print("  El script NO eliminará la base de datos existente.")
+        print("  Solo ejecutará CREATE IF NOT EXISTS e INSERT OR IGNORE.")
+        print("  Los datos existentes se conservarán intactos.\n")
+        respuesta = input("  ¿Deseas continuar con la inicialización segura? (s/n): ").strip().lower()
+        if respuesta != "s":
+            print("\n[CANCELADO] Operación cancelada por el usuario.")
+            sys.exit(0)
+        return True
+    return False
+
+
+# ============================================================
+# CREACIÓN DE LA BASE
+# ============================================================
+
+def crear_base(db_path):
+    """Crea la base de datos, aplica el esquema e inserta semilla."""
+
+    print(f"\n[INICIO] Inicializando base de datos: {db_path}")
+
+    con = sqlite3.connect(db_path)
+    con.execute("PRAGMA foreign_keys = ON;")
+
+    try:
+        cursor = con.cursor()
+
+        # Aplicar esquema completo
+        print("  [OK] Aplicando esquema SQL...")
+        con.executescript(SCHEMA_SQL)
+
+        # Verificar si ya hay datos semilla
+        resultado = cursor.execute("SELECT COUNT(*) FROM statuses").fetchone()
+        if resultado[0] == 0:
+            print("  [OK] Insertando datos semilla...")
+            insertar_semilla(cursor, TIMESTAMP)
+        else:
+            print("  [INFO] Datos semilla ya presentes. No se reinsertan.")
+
+        con.commit()
+        print(f"\n[ÉXITO] Base de datos lista: {db_path}")
+
+    except sqlite3.Error as e:
+        con.rollback()
+        print(f"\n[ERROR] Fallo durante la inicialización: {e}")
+        sys.exit(1)
+
+    finally:
+        con.close()
+
+
+# ============================================================
+# REPORTE DE VERIFICACIÓN
+# ============================================================
+
+def reporte_verificacion(db_path):
+    """Muestra un resumen de las tablas creadas y registros semilla."""
+
+    print("\n--- REPORTE DE VERIFICACIÓN ---")
+    con = sqlite3.connect(db_path)
+    cursor = con.cursor()
+
+    tablas = [
+        "projects", "entry_types", "priorities", "statuses",
+        "modules", "context_entries", "tags", "entry_tags",
+        "entry_relations", "activity_log"
+    ]
+
+    for tabla in tablas:
+        try:
+            count = cursor.execute(f"SELECT COUNT(*) FROM {tabla}").fetchone()[0]
+            print(f"  {tabla:<25} {count:>4} registro(s)")
+        except sqlite3.Error as e:
+            print(f"  {tabla:<25} ERROR: {e}")
+
+    con.close()
+    print("-------------------------------\n")
+
+
+# ============================================================
+# PUNTO DE ENTRADA
+# ============================================================
+
+def main():
+    db_path = DB_FILENAME
+
+    verificar_base_existente(db_path)
+    crear_base(db_path)
+    reporte_verificacion(db_path)
+
+    print("[SISTEMA] OMEN Context Database v1.0 inicializada correctamente.")
+    print("[SISTEMA] Lista para uso manual inmediato.\n")
+
+
+if __name__ == "__main__":
+    main()

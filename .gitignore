@@ -1,0 +1,13 @@
+*.db
+*.sqlite
+*.sqlite3
+*.log
+pycache/
+*.pyc
+.env
+venv/
+.venv/
+backups/
+private/
+local_data/
+exports/
